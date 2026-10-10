@@ -1,9 +1,11 @@
 using System;
 using System.Net;
 using System.Net.Http;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web.Http;
+using NPOI.XSSF.UserModel;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using OtherFees.Api;
@@ -22,7 +24,7 @@ namespace OtherFees.Tests
             client = NewClient(true);
         }
         [TearDown] public void TearDown() { client.Dispose(); fixture.Dispose(); }
-        private HttpClient NewClient(bool reset) => new HttpClient(new HttpServer(ApiConfiguration.Create(fixture.Service, fixture.Maintenance, reset)))
+        private HttpClient NewClient(bool reset) => new HttpClient(new HttpServer(ApiConfiguration.Create(fixture.Service, fixture.ImportService, fixture.Maintenance, reset)))
         { BaseAddress = new Uri("http://localhost/"), Timeout = TimeSpan.FromSeconds(20) };
         private static StringContent Json(string value) => new StringContent(value, Encoding.UTF8, "application/json");
         private const string Original = "{\"ProjectId\":\"7-51231123\",\"Name\":\"测试其他费用\",\"IncomePrice\":521,\"CostPrice\":520}";
@@ -122,6 +124,63 @@ namespace OtherFees.Tests
             using (var response = await restricted.PostAsync("api/reset", null))
                 Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
             Assert.That(fixture.Service.List("demo-zero").Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public async Task ImportEndpoint_AcceptsMultipartAndReturnsRowReport()
+        {
+            byte[] workbook;
+            using (var book = new XSSFWorkbook())
+            using (var stream = new System.IO.MemoryStream())
+            {
+                var sheet = book.CreateSheet("项目汇总清单");
+                string[] headers = { "项目Id", "费用名称", "收入价", "成本价", "描述" };
+                var header = sheet.CreateRow(0);
+                for (int i = 0; i < headers.Length; i++) header.CreateCell(i).SetCellValue(headers[i]);
+                var row = sheet.CreateRow(1);
+                row.CreateCell(0).SetCellValue("demo-zero"); row.CreateCell(1).SetCellValue("HTTP导入");
+                row.CreateCell(2).SetCellValue(12.5); row.CreateCell(3).SetCellValue(3.5);
+                book.Write(stream); workbook = stream.ToArray();
+            }
+            using (var multipart = new MultipartFormDataContent())
+            using (var content = new ByteArrayContent(workbook))
+            {
+                multipart.Add(content, "file", "import.xlsx");
+                using (var response = await client.PostAsync("api/projects/demo-zero/other-fees/import", multipart))
+                {
+                    Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                    var report = JObject.Parse(await response.Content.ReadAsStringAsync());
+                    Assert.That((int)report["SuccessCount"], Is.EqualTo(1));
+                    Assert.That((int)report["CreatedCount"], Is.EqualTo(1));
+                    Assert.That((int)report["FailureCount"], Is.Zero);
+                }
+            }
+            Assert.That(fixture.Service.List("demo-zero").Single().Name, Is.EqualTo("HTTP导入"));
+        }
+
+        [Test, Explicit("Set OTHERFEES_ORIGINAL_IMPORT_XLSX to the unmodified source workbook.")]
+        public async Task ImportOriginalWorkbookWhenConfigured()
+        {
+            string path = Environment.GetEnvironmentVariable("OTHERFEES_ORIGINAL_IMPORT_XLSX");
+            Assert.That(path, Is.Not.Null.And.Not.Empty);
+            using (var multipart = new MultipartFormDataContent())
+            using (var content = new ByteArrayContent(System.IO.File.ReadAllBytes(path)))
+            {
+                multipart.Add(content, "file", System.IO.Path.GetFileName(path));
+                using (var response = await client.PostAsync("api/projects/7-51231123/other-fees/import", multipart))
+                {
+                    Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                    var report = JObject.Parse(await response.Content.ReadAsStringAsync());
+                    Assert.That((int)report["SuccessCount"], Is.EqualTo(2));
+                    Assert.That((int)report["CreatedCount"], Is.EqualTo(1));
+                    Assert.That((int)report["UpdatedCount"], Is.EqualTo(1));
+                    Assert.That((int)report["FailureCount"], Is.Zero);
+                }
+            }
+            var imported = fixture.Service.List("7-51231123").Single();
+            Assert.That(imported.Name, Is.EqualTo("测试费用1"));
+            Assert.That(imported.IncomePrice, Is.EqualTo(50m));
+            Assert.That(imported.CostPrice, Is.EqualTo(70m));
         }
     }
 }

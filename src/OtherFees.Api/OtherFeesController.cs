@@ -1,6 +1,9 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
 using System.Web.Http;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -25,7 +28,8 @@ namespace OtherFees.Api
     public sealed class OtherFeesController : ApiController
     {
         private readonly OtherFeeService fees;
-        public OtherFeesController(OtherFeeService fees) { this.fees = fees; }
+        private readonly OtherFeeImportService importer;
+        public OtherFeesController(OtherFeeService fees, OtherFeeImportService importer) { this.fees = fees; this.importer = importer; }
 
         [HttpPost, Route("api/other-fees")]
         public IHttpActionResult Create([FromBody] CreateFeeRequest body)
@@ -38,6 +42,29 @@ namespace OtherFees.Api
 
         [HttpGet, Route("api/projects/{projectId}/other-fees")]
         public IHttpActionResult List(string projectId) => Ok(fees.List(projectId));
+
+        [HttpPost, Route("api/projects/{projectId}/other-fees/import")]
+        public async Task<IHttpActionResult> Import(string projectId)
+        {
+            if (!Request.Content.IsMimeMultipartContent())
+                return Content(HttpStatusCode.BadRequest, new ApiError("MULTIPART_REQUIRED", "请使用multipart/form-data上传Excel文件。", "File"));
+            var provider = new MultipartMemoryStreamProvider();
+            await Request.Content.ReadAsMultipartAsync(provider);
+            if (provider.Contents.Count != 1 || provider.Contents[0].Headers.ContentDisposition.FileName == null)
+                return Content(HttpStatusCode.BadRequest, new ApiError("FILE_REQUIRED", "请只上传一个Excel文件。", "File"));
+            HttpContent part = provider.Contents[0];
+            if (part.Headers.ContentLength == 0)
+                return Content(HttpStatusCode.BadRequest, new ApiError("FILE_REQUIRED", "上传的Excel文件不能为空。", "File"));
+            try
+            {
+                using (Stream stream = await part.ReadAsStreamAsync())
+                    return Ok(importer.Import(projectId, stream));
+            }
+            catch (ImportFormatException error)
+            {
+                return Content(HttpStatusCode.BadRequest, new ApiError("IMPORT_FILE_INVALID", error.Message, "File"));
+            }
+        }
 
         // PUT替换可编辑字段：收入/备注省略时变为null，成本/名称仍然必填。
         [HttpPut, Route("api/other-fees/{id}")]

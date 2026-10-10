@@ -1,6 +1,6 @@
-# B组 MVP1：其他费用维护
+# B组后端：其他费用维护与导入
 
-已实现本地 WebAPI、SQLite 初始化、Reset、其他费用新增/查询/修改/删除。目标框架为 **C# / .NET Framework 4.8**，运行于 Windows x64。Excel 导入与导出将在 MVP2、MVP3 实现；当前还不是完整 B 组交付。
+已实现本地 WebAPI、SQLite 初始化、Reset、其他费用新增/查询/修改/删除，以及 MVP2 Excel 导入。目标框架为 **C# / .NET Framework 4.8**，运行于 Windows x64。Excel 导出仍待 MVP3；当前还不是完整 B 组交付。
 
 先读 [第一节：业务与代码](docs/MVP1业务与代码.md)，再运行下面的示例。原题依据为上级目录中的 `其他费用录入、导入与导出-需求实现.docx`，原题与旧材料冲突时以该文档为准。
 
@@ -33,12 +33,23 @@ Invoke-RestMethod -Uri http://localhost:5080/api/projects/7-51231123/other-fees
 
 完整 CRUD 请求见 [other-fees.http](examples/other-fees.http)。可以在支持 HTTP 文件的工具中执行，也可以复制到 Postman；修改、删除使用新增响应中的真实 `Id`。
 
+## Excel 导入（MVP2）
+
+接口按请求路径指定目标项目。五列表格还必须在每一行提供相同的项目Id；十列标准清单从“其他费用”章节读取费用行。列顺序可以变化，程序按表头定位；重复关键表头或无法识别的文件结构会在写入前整体拒绝。
+
+```powershell
+curl.exe -F "file=@C:\路径\导入其他费用清单.xlsx" http://localhost:5080/api/projects/7-51231123/other-fees/import
+```
+
+同项目同名导入会覆盖金额和备注，保留原记录 Id 与顺序。逐行验证和保存：有效行成功，失败行在 `Errors` 中返回 Excel 行号、字段、错误码和原因；一个失败行不会撤销此前的成功行，也不会阻止后续行。`FailureCount` 表示失败行数，`Errors` 可包含该行的多个字段错误。
+
 ## 接口
 
 | 方法 | 路径 | 成功响应 | 行为 |
 | --- | --- | --- | --- |
 | POST | `/api/other-fees` | 201，费用 JSON | 新增，禁止同项目重名 |
 | GET | `/api/projects/{projectId}/other-fees` | 200，JSON 数组 | 按新增顺序返回全部其他费用，含利润/利润率 |
+| POST | `/api/projects/{projectId}/other-fees/import` | 200，导入报告 | multipart/form-data 上传一个 `.xls` 或 `.xlsx` 文件；报告含成功、新增、更新、失败数量和逐行错误 |
 | PUT | `/api/other-fees/{id}` | 200，费用 JSON | 替换名称、收入、成本、备注，ID 和所属项目不变 |
 | DELETE | `/api/other-fees/{id}` | 204，无响应体 | 按记录 ID 删除 |
 | POST | `/api/reset` | 200，初始化数量 JSON | 清空并初始化项目、固定工项、设计费 |
@@ -86,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\smoke.ps1 -SkipBuild
 | 阶段 | 完成条件 |
 | --- | --- |
 | MVP1，本次 | 本地能启动；Reset 后 CRUD 正常；边界错误清楚；持久化和计算验证通过 |
-| MVP2 | NPOI 导入原始材料；按表头/章节识别；同名覆盖；异常逐行报告；单元格类型与容错测试通过 |
+| MVP2 | 已实现五列与十列导入、按表头/章节识别、同名覆盖和逐行报告；更多异常单元格与原题演示仍待完整验收 |
 | MVP3 | 从数据库生成完整清单；汇总/税金/利润率正确；样式与打印设置一致；导入→导出完整演示 |
 | MVP4 | 完整复验、实现思路文档、演示录屏与提交材料齐全，能够独立解释业务及代码 |
 

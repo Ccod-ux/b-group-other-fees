@@ -12,7 +12,14 @@ namespace OtherFees.Application
         bool NameExists(string projectId, string normalizedName, string exceptId = null);
         OtherFee Insert(OtherFee fee);
         OtherFee Update(OtherFee fee);
+        ImportSaveResult ImportUpsert(OtherFee fee);
         bool Delete(string id);
+    }
+
+    public sealed class ImportSaveResult
+    {
+        public OtherFee Fee { get; set; }
+        public bool Created { get; set; }
     }
 
     public interface IDatabaseMaintenance

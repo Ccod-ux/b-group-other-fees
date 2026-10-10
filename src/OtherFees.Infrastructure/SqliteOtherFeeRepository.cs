@@ -53,6 +53,49 @@ namespace OtherFees.Infrastructure
         public OtherFee Insert(OtherFee fee) => Save(fee, true);
         public OtherFee Update(OtherFee fee) => Save(fee, false);
 
+        public ImportSaveResult ImportUpsert(OtherFee fee)
+        {
+            using (var connection = database.Open())
+            using (var transaction = connection.BeginTransaction())
+            {
+                string existingId = null;
+                using (var find = new SQLiteCommand("SELECT Id FROM OtherFees WHERE ProjectId=@project AND NormalizedName=@name", connection, transaction))
+                {
+                    find.Parameters.AddWithValue("@project", fee.ProjectId);
+                    find.Parameters.AddWithValue("@name", fee.NormalizedName);
+                    object value = find.ExecuteScalar();
+                    if (value != null && value != DBNull.Value) existingId = (string)value;
+                }
+
+                string sql = existingId == null
+                    ? "INSERT INTO OtherFees(Id,ProjectId,Name,NormalizedName,IncomeCents,CostCents,Remark) VALUES(@id,@project,@name,@normalized,@income,@cost,@remark)"
+                    : "UPDATE OtherFees SET Name=@name,NormalizedName=@normalized,IncomeCents=@income,CostCents=@cost,Remark=@remark WHERE Id=@id AND ProjectId=@project";
+                try
+                {
+                    using (var command = new SQLiteCommand(sql, connection, transaction))
+                    {
+                        command.Parameters.AddWithValue("@id", existingId ?? fee.Id);
+                        command.Parameters.AddWithValue("@project", fee.ProjectId);
+                        command.Parameters.AddWithValue("@name", fee.Name);
+                        command.Parameters.AddWithValue("@normalized", fee.NormalizedName);
+                        command.Parameters.AddWithValue("@income", fee.Income == null ? (object)DBNull.Value : fee.Income.Cents);
+                        command.Parameters.AddWithValue("@cost", fee.Cost.Cents);
+                        command.Parameters.AddWithValue("@remark", (object)fee.Remark ?? DBNull.Value);
+                        command.ExecuteNonQuery();
+                    }
+                    OtherFee saved = Find(connection, transaction, existingId ?? fee.Id);
+                    transaction.Commit();
+                    return new ImportSaveResult { Fee = saved, Created = existingId == null };
+                }
+                catch (SQLiteException error)
+                {
+                    if (error.ResultCode == SQLiteErrorCode.Constraint && error.Message.IndexOf("OtherFees.ProjectId, OtherFees.NormalizedName", StringComparison.Ordinal) >= 0)
+                        throw OtherFee.DuplicateName();
+                    throw;
+                }
+            }
+        }
+
         private OtherFee Save(OtherFee fee, bool insert)
         {
             using (var connection = database.Open())

@@ -13,13 +13,13 @@ namespace OtherFees.Api
 {
     public static class ApiConfiguration
     {
-        public static HttpConfiguration Create(OtherFeeService fees, IDatabaseMaintenance maintenance, bool enableReset)
+        public static HttpConfiguration Create(OtherFeeService fees, OtherFeeImportService importer, IDatabaseMaintenance maintenance, bool enableReset)
         {
             var configuration = new HttpConfiguration();
             configuration.Formatters.Remove(configuration.Formatters.XmlFormatter);
             configuration.Formatters.JsonFormatter.SerializerSettings.DateParseHandling = DateParseHandling.None;
             configuration.IncludeErrorDetailPolicy = IncludeErrorDetailPolicy.Never;
-            configuration.Services.Replace(typeof(IHttpControllerActivator), new ControllerFactory(fees, maintenance, enableReset));
+            configuration.Services.Replace(typeof(IHttpControllerActivator), new ControllerFactory(fees, importer, maintenance, enableReset));
             configuration.Services.Replace(typeof(IExceptionHandler), new ApiExceptionHandler());
             configuration.MapHttpAttributeRoutes();
             configuration.EnsureInitialized();
@@ -29,13 +29,14 @@ namespace OtherFees.Api
         private sealed class ControllerFactory : IHttpControllerActivator
         {
             private readonly OtherFeeService fees;
+            private readonly OtherFeeImportService importer;
             private readonly IDatabaseMaintenance maintenance;
             private readonly bool enableReset;
-            public ControllerFactory(OtherFeeService fees, IDatabaseMaintenance maintenance, bool enableReset)
-            { this.fees = fees; this.maintenance = maintenance; this.enableReset = enableReset; }
+            public ControllerFactory(OtherFeeService fees, OtherFeeImportService importer, IDatabaseMaintenance maintenance, bool enableReset)
+            { this.fees = fees; this.importer = importer; this.maintenance = maintenance; this.enableReset = enableReset; }
             public IHttpController Create(HttpRequestMessage request, HttpControllerDescriptor descriptor, Type type)
             {
-                if (type == typeof(OtherFeesController)) return new OtherFeesController(fees);
+                if (type == typeof(OtherFeesController)) return new OtherFeesController(fees, importer);
                 if (type == typeof(SystemController)) return new SystemController(maintenance, enableReset);
                 throw new InvalidOperationException("未知控制器。");
             }

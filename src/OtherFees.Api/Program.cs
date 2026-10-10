@@ -30,8 +30,11 @@ namespace OtherFees.Api
                 var database = new SqliteDatabase(dataPath);
                 var maintenance = new DatabaseMaintenance(database, Path.Combine(basePath, "database/schema.sql"), Path.Combine(basePath, "database/seed.json"));
                 maintenance.EnsureInitialized();
-                var service = new OtherFeeService(new SqliteProjectRepository(database), new SqliteOtherFeeRepository(database));
-                using (var configuration = ApiConfiguration.Create(service, maintenance, enableReset))
+                var projects = new SqliteProjectRepository(database);
+                var repository = new SqliteOtherFeeRepository(database);
+                var service = new OtherFeeService(projects, repository);
+                var importer = new OtherFeeImportService(projects, repository, new OtherFeeWorkbookReader());
+                using (var configuration = ApiConfiguration.Create(service, importer, maintenance, enableReset))
                 using (WebApp.Start(url, app => app.UseWebApi(configuration)))
                 using (var stopping = new ManualResetEvent(false))
                 {

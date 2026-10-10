@@ -14,6 +14,7 @@ namespace OtherFees.Tests
         public DatabaseMaintenance Maintenance { get; }
         public SqliteOtherFeeRepository Repository { get; }
         public OtherFeeService Service { get; }
+        public OtherFeeImportService ImportService { get; }
 
         public TestDatabase()
         {
@@ -26,7 +27,9 @@ namespace OtherFees.Tests
             Maintenance = new DatabaseMaintenance(Database, Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "database/schema.sql"), SeedPath);
             Maintenance.EnsureInitialized();
             Repository = new SqliteOtherFeeRepository(Database);
-            Service = new OtherFeeService(new SqliteProjectRepository(Database), Repository);
+            var projects = new SqliteProjectRepository(Database);
+            Service = new OtherFeeService(projects, Repository);
+            ImportService = new OtherFeeImportService(projects, Repository, new OtherFeeWorkbookReader());
         }
 
         public void Dispose()
