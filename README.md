@@ -1,6 +1,6 @@
-# B组后端：其他费用维护与导入
+# B组后端：其他费用维护 导入与导出
 
-已实现本地 WebAPI、SQLite 初始化、Reset、其他费用新增/查询/修改/删除，以及 MVP2 Excel 导入。目标框架为 **C# / .NET Framework 4.8**，运行于 Windows x64。Excel 导出仍待 MVP3；当前还不是完整 B 组交付。
+已实现本地 WebAPI、SQLite 初始化、Reset、其他费用新增/查询/修改/删除、Excel 导入与标准项目汇总清单导出。目标框架为 **C# / .NET Framework 4.8**，运行于 Windows x64。MVP1至MVP3已完成；最终交付材料及录屏留到MVP4。
 
 先读 [第一节：业务与代码](docs/MVP1业务与代码.md)，再运行下面的示例。原题依据为上级目录中的 `其他费用录入、导入与导出-需求实现.docx`，原题与旧材料冲突时以该文档为准。
 
@@ -52,12 +52,27 @@ curl.exe -F "file=@C:\路径\导入其他费用清单.xlsx" http://localhost:508
 | POST | `/api/other-fees` | 201，费用 JSON | 新增，禁止同项目重名 |
 | GET | `/api/projects/{projectId}/other-fees` | 200，JSON 数组 | 按新增顺序返回全部其他费用，含利润/利润率 |
 | POST | `/api/projects/{projectId}/other-fees/import` | 200，导入报告 | multipart/form-data 上传一个 `.xls` 或 `.xlsx` 文件；报告含成功、新增、更新、失败数量和逐行错误 |
+| GET | `/api/projects/{projectId}/summary/export` | 200，`.xlsx` 下载 | 从数据库读取项目、六个固定工项、设计费及全部其他费用，重算汇总、税金和利润率 |
 | PUT | `/api/other-fees/{id}` | 200，费用 JSON | 替换名称、收入、成本、备注，ID 和所属项目不变 |
 | DELETE | `/api/other-fees/{id}` | 204，无响应体 | 按记录 ID 删除 |
 | POST | `/api/reset` | 200，初始化数量 JSON | 清空并初始化项目、固定工项、设计费 |
 | GET | `/api/health` | 200，状态 JSON | 确认服务可访问 |
 
 PUT 的名称、成本必填；收入、备注省略或传 null 均变为 null。ProjectId 不能通过 PUT 改变。客户端传入 `Profit`、`ProfitRatePercent` 或其他未知字段会返回 400。错误 JSON 包含 `Code`、`Message`、`Field`：输入错误 400、记录/项目不存在 404、同项目重名 409。
+
+## 标准清单导出（MVP3）
+
+```powershell
+Invoke-WebRequest -Uri http://localhost:5080/api/projects/7-51231123/summary/export -OutFile 项目汇总清单.xlsx
+```
+
+导出读取四张表在同一个数据库事务中的一致快照，释放连接后生成Excel。领域层的`ProjectSummary`负责计算；应用服务组织读取和生成；`SqliteProjectSummaryRepository`隔离SQL，`ProjectSummaryWorkbookWriter`用NPOI写表。文件不依赖原始Excel附件或请求中的金额。
+
+六个固定工项按1至6排序，其他费用按数据库创建顺序从7续排；覆盖更新保留位置，删除后序号连续。建设安装工程费汇总全部明细，设计费来自持久化记录，不含税合计相加；收入和成本分别按项目税率计算税金并舍入到分，再计算税金利润和含税合计。种子税率为9%，汇总利润率按汇总利润除以汇总收入重新计算。
+
+Excel金额为数值且使用`0.00`，利润率保存原始比例并用`0.00%`显示，521/520显示0.19%。空收入的明细C列留空，计算时按0处理；面积为空或0时F/G/H显示0.00，税金行F至I留空。已有正面积则读取并计算单方收入/成本。费用名称和备注以文本写入。
+
+工作表名称、A1:J1合并、十列表头、微软雅黑字体、灰/橙/绿/蓝/黄底色、细边框、列宽及28/24磅行高按样例生成。原样例没有指定纸张、方向或缩放，导出保留默认设置及页边距；增加动态A1:J末行打印范围。不存在的项目返回404；缺六个固定项或设计费返回400 `SUMMARY_DATA_INCOMPLETE`，不静默补零。
 
 ## 数据与配置
 
@@ -93,11 +108,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\smoke.ps1 -SkipBuild
 
 # 原始附件导入、重复覆盖、错误清单及进程重启演示：默认5092端口
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke-import.ps1 -SkipBuild -File 'C:\路径\导入其他费用清单.xlsx'
+
+# 原附件导入→下载、重启、CRUD后导出及导出回读：默认5093端口
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-export.ps1 -SkipBuild -File 'C:\路径\导入其他费用清单.xlsx'
 ```
 
-验证覆盖金额/利润率、CRUD、Reset、SQLite 持久化、五列/十列导入、单元格类型与异常归属。测试结果写入 `artifacts/test-results/mvp2.trx`；运行演示的 JSON 和日志分别保存在 `artifacts/smoke/{本次ID}`、`artifacts/import-smoke/{本次ID}`。验收映射见 [MVP1验收记录](docs/MVP1验收记录.md)和 [MVP2验收记录](docs/MVP2验收记录.md)。
+验证覆盖金额/利润率、CRUD、Reset、SQLite持久化、五列/十列导入、单元格类型、异常归属及导出计算与样式。当前91个自动化用例通过；CRUD、导入和导出真实HTTP检查分别为9、8、15项。测试结果写入`artifacts/test-results/mvp3.trx`；演示JSON、Excel及日志保存在`artifacts/smoke/{本次ID}`、`artifacts/import-smoke/{本次ID}`、`artifacts/export-smoke/{本次ID}`。见[MVP1验收记录](docs/MVP1验收记录.md)、[MVP2验收记录](docs/MVP2验收记录.md)与[MVP3验收记录](docs/MVP3验收记录.md)。
 
-原始附件不在公开仓库。传入 `scripts/test.ps1 -OriginalImportFile 'C:\路径\导入其他费用清单.xlsx'` 才会运行该附件的自动化测试；未传入时只跳过这一项，生成的边界测试文件仍会执行。遇到正在运行的 API 锁住默认输出文件时，可用 `scripts/test.ps1 -OutputPath artifacts/mvp2-validation-build` 构建和测试；运行演示时加 `-ApiDirectory artifacts/mvp2-validation-build/Release/net48 -SkipBuild`。
+原始附件不在公开仓库。传入 `scripts/test.ps1 -OriginalImportFile 'C:\路径\导入其他费用清单.xlsx'` 才会运行该附件的自动化测试；未传入时只跳过这一项，生成的边界测试文件仍会执行。遇到正在运行的 API 锁住默认输出文件时，可用 `scripts/test.ps1 -OutputPath artifacts/mvp3-validation-build` 构建和测试；运行演示时加 `-ApiDirectory artifacts/mvp3-validation-build/Release/net48 -SkipBuild`。
 
 ## 后续 MVP
 
@@ -105,7 +123,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\smoke-import.ps1 -SkipBuild -
 | --- | --- |
 | MVP1，已完成 | 本地启动、Reset、CRUD、持久化和计算验证通过 |
 | MVP2，已完成 | 五列与十列导入、表头/章节、同名覆盖和异常报告通过验收07至12；68项测试及8项导入HTTP检查通过 |
-| MVP3 | 从数据库生成完整清单；汇总/税金/利润率正确；样式与打印设置一致；导入→导出完整演示 |
+| MVP3，已完成 | 从数据库生成完整清单，汇总/税金/利润率正确，样式与打印设置可对照；验收13至17、91项测试及15项导出HTTP检查通过 |
 | MVP4 | 完整复验、实现思路文档、演示录屏与提交材料齐全，能够独立解释业务及代码 |
 
 ## Git 与 GitHub

@@ -24,7 +24,7 @@ namespace OtherFees.Tests
             client = NewClient(true);
         }
         [TearDown] public void TearDown() { client.Dispose(); fixture.Dispose(); }
-        private HttpClient NewClient(bool reset) => new HttpClient(new HttpServer(ApiConfiguration.Create(fixture.Service, fixture.ImportService, fixture.Maintenance, reset)))
+        private HttpClient NewClient(bool reset) => new HttpClient(new HttpServer(ApiConfiguration.Create(fixture.Service, fixture.ImportService, fixture.ExportService, fixture.Maintenance, reset)))
         { BaseAddress = new Uri("http://localhost/"), Timeout = TimeSpan.FromSeconds(20) };
         private static StringContent Json(string value) => new StringContent(value, Encoding.UTF8, "application/json");
         private const string Original = "{\"ProjectId\":\"7-51231123\",\"Name\":\"测试其他费用\",\"IncomePrice\":521,\"CostPrice\":520}";
@@ -215,6 +215,36 @@ namespace OtherFees.Tests
                 }
             }
             Assert.That(fixture.Service.List("demo-zero"), Is.Empty);
+        }
+
+        [Test]
+        public async Task ExportEndpoint_DownloadsPersistedWorkbookWithCorrectHeaders()
+        {
+            fixture.Service.Create("demo-zero", "HTTP费用", 521m, 520m, null);
+            using (var response = await client.GetAsync("api/projects/demo-zero/summary/export"))
+            {
+                Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(response.Content.Headers.ContentType.MediaType, Is.EqualTo("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+                Assert.That(response.Content.Headers.ContentDisposition.DispositionType, Is.EqualTo("attachment"));
+                Assert.That(response.Content.Headers.ContentDisposition.FileNameStar, Is.EqualTo("项目汇总清单.xlsx"));
+                Assert.That(response.Headers.CacheControl.NoStore, Is.True);
+                using (var book = new XSSFWorkbook(new System.IO.MemoryStream(await response.Content.ReadAsByteArrayAsync())))
+                {
+                    var fee = book.GetSheetAt(0).GetRow(9);
+                    Assert.That(fee.GetCell(1).StringCellValue, Is.EqualTo("HTTP费用"));
+                    Assert.That(fee.GetCell(4).NumericCellValue, Is.EqualTo(1));
+                }
+            }
+        }
+
+        [Test]
+        public async Task ExportMissingProject_ReturnsJson404()
+        {
+            using (var response = await client.GetAsync("api/projects/missing/summary/export"))
+            {
+                Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+                Assert.That((string)JObject.Parse(await response.Content.ReadAsStringAsync())["Code"], Is.EqualTo("PROJECT_NOT_FOUND"));
+            }
         }
     }
 }

@@ -20,3 +20,17 @@ Content-Type: application/json
 
 ### 5. 删除；期望204，再次删除期望404
 DELETE {{baseUrl}}/api/other-fees/替换为实际Id
+
+### 6. 导入原始附件（替换实际路径；客户端需支持multipart文件上传）
+POST {{baseUrl}}/api/projects/7-51231123/other-fees/import
+Content-Type: multipart/form-data; boundary=OtherFeesDemo
+
+--OtherFeesDemo
+Content-Disposition: form-data; name="file"; filename="import.xlsx"
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+< C:/路径/导入其他费用清单.xlsx
+--OtherFeesDemo--
+
+### 7. 下载项目汇总清单（从数据库读取当前值）
+GET {{baseUrl}}/api/projects/7-51231123/summary/export

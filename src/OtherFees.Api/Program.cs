@@ -34,7 +34,8 @@ namespace OtherFees.Api
                 var repository = new SqliteOtherFeeRepository(database);
                 var service = new OtherFeeService(projects, repository);
                 var importer = new OtherFeeImportService(projects, repository, new OtherFeeWorkbookReader());
-                using (var configuration = ApiConfiguration.Create(service, importer, maintenance, enableReset))
+                var exporter = new ProjectSummaryExportService(new SqliteProjectSummaryRepository(database), new ProjectSummaryWorkbookWriter());
+                using (var configuration = ApiConfiguration.Create(service, importer, exporter, maintenance, enableReset))
                 using (WebApp.Start(url, app => app.UseWebApi(configuration)))
                 using (var stopping = new ManualResetEvent(false))
                 {
@@ -42,7 +43,7 @@ namespace OtherFees.Api
                     Console.CancelKeyPress += handler;
                     try
                     {
-                        Console.WriteLine("MVP1 API: " + url + "api/health");
+                        Console.WriteLine("OtherFees API: " + url + "api/health");
                         Console.WriteLine("SQLite: " + Path.GetFullPath(dataPath));
                         Console.WriteLine("按 Ctrl+C 停止。重启会保留数据；POST api/reset 会恢复初始数据。");
                         stopping.WaitOne();

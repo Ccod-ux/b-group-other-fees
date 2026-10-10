@@ -15,6 +15,7 @@ namespace OtherFees.Tests
         public SqliteOtherFeeRepository Repository { get; }
         public OtherFeeService Service { get; }
         public OtherFeeImportService ImportService { get; }
+        public ProjectSummaryExportService ExportService { get; }
 
         public TestDatabase()
         {
@@ -30,6 +31,7 @@ namespace OtherFees.Tests
             var projects = new SqliteProjectRepository(Database);
             Service = new OtherFeeService(projects, Repository);
             ImportService = new OtherFeeImportService(projects, Repository, new OtherFeeWorkbookReader());
+            ExportService = new ProjectSummaryExportService(new SqliteProjectSummaryRepository(Database), new ProjectSummaryWorkbookWriter());
         }
 
         public void Dispose()
