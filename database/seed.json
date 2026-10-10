@@ -1,0 +1,35 @@
+{
+  "Source": "B组导出样例的固定工项明细；示例名称由本项目补充。汇总值不复制样例。",
+  "Projects": [
+    {
+      "ProjectId": "7-51231123",
+      "Name": "B组演示项目",
+      "BuildingArea": null,
+      "TaxRate": 0.09,
+      "FixedWorkItems": [
+        { "SortOrder": 1, "IncomePrice": 26174.91, "CostPrice": 13742.40 },
+        { "SortOrder": 2, "IncomePrice": 8333.49, "CostPrice": 108953.33 },
+        { "SortOrder": 3, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 4, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 5, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 6, "IncomePrice": 0, "CostPrice": 0 }
+      ],
+      "DesignFee": { "IncomePrice": 0, "CostPrice": 0 }
+    },
+    {
+      "ProjectId": "demo-zero",
+      "Name": "零基础验证项目",
+      "BuildingArea": null,
+      "TaxRate": 0.09,
+      "FixedWorkItems": [
+        { "SortOrder": 1, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 2, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 3, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 4, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 5, "IncomePrice": 0, "CostPrice": 0 },
+        { "SortOrder": 6, "IncomePrice": 0, "CostPrice": 0 }
+      ],
+      "DesignFee": { "IncomePrice": 0, "CostPrice": 0 }
+    }
+  ]
+}

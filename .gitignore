@@ -1,0 +1,16 @@
+.tools/
+**/bin/
+**/obj/
+**/TestResults/
+App_Data/
+artifacts/
+*.user
+.vs/
+~$*
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.local.config
+.env
+.env.*

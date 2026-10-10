@@ -1,0 +1,22 @@
+@baseUrl = http://localhost:5080
+
+### 1. 恢复初始数据（会清空业务数据，只在演示库执行）
+POST {{baseUrl}}/api/reset
+
+### 2. 原题JSON：期望201，Profit=1，ProfitRatePercent=0.19
+POST {{baseUrl}}/api/other-fees
+Content-Type: application/json
+
+{"ProjectId":"7-51231123","Name":"测试其他费用","IncomePrice":521.00,"CostPrice":520.00}
+
+### 3. 查询项目的费用；重复执行步骤2期望409
+GET {{baseUrl}}/api/projects/7-51231123/other-fees
+
+### 4. 用步骤2返回的Id替换下面的占位值；期望200，利润-20，利润率-40%
+PUT {{baseUrl}}/api/other-fees/替换为实际Id
+Content-Type: application/json
+
+{"Name":"测试其他费用","IncomePrice":50,"CostPrice":70,"Remark":"修改示例"}
+
+### 5. 删除；期望204，再次删除期望404
+DELETE {{baseUrl}}/api/other-fees/替换为实际Id

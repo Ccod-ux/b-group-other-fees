@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../OtherFees.Application/OtherFees.Application.csproj" />
+    <ProjectReference Include="../OtherFees.Infrastructure/OtherFees.Infrastructure.csproj" />
+    <Reference Include="System.Configuration" />
+    <PackageReference Include="Microsoft.AspNet.WebApi.OwinSelfHost" Version="5.3.0" />
+    <PackageReference Include="Microsoft.Owin.Hosting" Version="4.2.3" />
+    <PackageReference Include="Microsoft.Owin.Host.HttpListener" Version="4.2.3" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../database/schema.sql" Link="database/schema.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../database/seed.json" Link="database/seed.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

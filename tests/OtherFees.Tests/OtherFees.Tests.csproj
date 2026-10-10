@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><IsTestProject>true</IsTestProject><AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/OtherFees.Api/OtherFees.Api.csproj" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../database/schema.sql" Link="database/schema.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../database/seed.json" Link="database/seed.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
