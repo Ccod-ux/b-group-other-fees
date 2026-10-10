@@ -1,8 +1,9 @@
-﻿param([switch]$SkipBuild, [int]$Port = 5091)
+﻿param([switch]$SkipBuild, [int]$Port = 5091, [string]$ApiDirectory)
 . (Join-Path $PSScriptRoot 'common.ps1')
 if (-not $SkipBuild) { & (Join-Path $PSScriptRoot 'build.ps1') }
 Add-Type -AssemblyName System.Net.Http
-$taskExe = Join-Path $taskRoot 'src/OtherFees.Api/bin/Release/net48/OtherFees.Api.exe'
+if (-not $ApiDirectory) { $ApiDirectory = Join-Path $taskRoot 'src/OtherFees.Api/bin/Release/net48' }
+$taskExe = (Resolve-Path -LiteralPath (Join-Path $ApiDirectory 'OtherFees.Api.exe')).Path
 $taskRunDirectory = Join-Path $taskRoot ('artifacts/smoke/' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $taskRunDirectory -Force | Out-Null
 $taskData = Join-Path $taskRunDirectory 'smoke.sqlite'

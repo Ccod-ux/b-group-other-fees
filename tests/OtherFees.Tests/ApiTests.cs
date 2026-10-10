@@ -158,11 +158,11 @@ namespace OtherFees.Tests
             Assert.That(fixture.Service.List("demo-zero").Single().Name, Is.EqualTo("HTTP导入"));
         }
 
-        [Test, Explicit("Set OTHERFEES_ORIGINAL_IMPORT_XLSX to the unmodified source workbook.")]
+        [Test]
         public async Task ImportOriginalWorkbookWhenConfigured()
         {
             string path = Environment.GetEnvironmentVariable("OTHERFEES_ORIGINAL_IMPORT_XLSX");
-            Assert.That(path, Is.Not.Null.And.Not.Empty);
+            if (string.IsNullOrWhiteSpace(path)) Assert.Ignore("设置OTHERFEES_ORIGINAL_IMPORT_XLSX后验证未修改的原始附件。");
             using (var multipart = new MultipartFormDataContent())
             using (var content = new ByteArrayContent(System.IO.File.ReadAllBytes(path)))
             {
@@ -181,6 +181,40 @@ namespace OtherFees.Tests
             Assert.That(imported.Name, Is.EqualTo("测试费用1"));
             Assert.That(imported.IncomePrice, Is.EqualTo(50m));
             Assert.That(imported.CostPrice, Is.EqualTo(70m));
+        }
+
+        [TestCase(0, "FILE_REQUIRED")]
+        [TestCase(2, "FILE_REQUIRED")]
+        [TestCase(1, "IMPORT_FILE_INVALID")]
+        public async Task ImportRejectsMissingMultipleOrCorruptedFiles(int count, string code)
+        {
+            using (var multipart = new MultipartFormDataContent())
+            {
+                for (int i = 0; i < count; i++) multipart.Add(new ByteArrayContent(new byte[] { 1, 2, 3 }), "file", "broken.xlsx");
+                using (var response = await client.PostAsync("api/projects/demo-zero/other-fees/import", multipart))
+                {
+                    Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                    Assert.That((string)JObject.Parse(await response.Content.ReadAsStringAsync())["Code"], Is.EqualTo(code));
+                }
+            }
+            Assert.That(fixture.Service.List("demo-zero"), Is.Empty);
+        }
+
+        [Test]
+        public async Task ImportRejectsWrongContentTypeAndMalformedMultipart()
+        {
+            using (var response = await client.PostAsync("api/projects/demo-zero/other-fees/import", Json("{}")))
+                Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            using (var broken = new StringContent("broken multipart body"))
+            {
+                broken.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse("multipart/form-data; boundary=missing");
+                using (var response = await client.PostAsync("api/projects/demo-zero/other-fees/import", broken))
+                {
+                    Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                    Assert.That((string)JObject.Parse(await response.Content.ReadAsStringAsync())["Code"], Is.EqualTo("MULTIPART_INVALID"));
+                }
+            }
+            Assert.That(fixture.Service.List("demo-zero"), Is.Empty);
         }
     }
 }

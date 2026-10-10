@@ -35,13 +35,15 @@ Invoke-RestMethod -Uri http://localhost:5080/api/projects/7-51231123/other-fees
 
 ## Excel 导入（MVP2）
 
-接口按请求路径指定目标项目。五列表格还必须在每一行提供相同的项目Id；十列标准清单从“其他费用”章节读取费用行。列顺序可以变化，程序按表头定位；重复关键表头或无法识别的文件结构会在写入前整体拒绝。
+接口按请求路径指定目标项目，工作表必须名为“项目汇总清单”。五列表格每行提供相同的项目Id；十列标准清单只读取“一 建设安装工程费”内具有正整数序号、且名称非六个固定工项的明细。列顺序可以变化，程序按表头定位；缺表头、重复表头、缺工作表或文件损坏会在写入前整体拒绝。
 
 ```powershell
 curl.exe -F "file=@C:\路径\导入其他费用清单.xlsx" http://localhost:5080/api/projects/7-51231123/other-fees/import
 ```
 
 同项目同名导入会覆盖金额和备注，保留原记录 Id 与顺序。逐行验证和保存：有效行成功，失败行在 `Errors` 中返回 Excel 行号、字段、错误码和原因；一个失败行不会撤销此前的成功行，也不会阻止后续行。`FailureCount` 表示失败行数，`Errors` 可包含该行的多个字段错误。
+
+正常章节和合计可带金额，仍按非业务行跳过；遇到损坏章节时报告该行，并暂停沿用旧归属，直到遇到完整的有效章节。数值、正确分组的金额文本和可计算公式可读取；空收入（含公式返回空文本）保留为 null，空成本失败。错误公式、布尔值、日期及非法金额文本不会转换成 0。
 
 ## 接口
 
@@ -88,16 +90,21 @@ powershell -ExecutionPolicy Bypass -File .\scripts\test.ps1
 
 # 真实 HTTP：独立进程、独立库，含停止/重启；默认5091端口
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke.ps1 -SkipBuild
+
+# 原始附件导入、重复覆盖、错误清单及进程重启演示：默认5092端口
+powershell -ExecutionPolicy Bypass -File .\scripts\smoke-import.ps1 -SkipBuild -File 'C:\路径\导入其他费用清单.xlsx'
 ```
 
-验证覆盖金额/利润率、字段校验、项目内重名及并发重名、SQLite 持久化、修改/删除、Reset 回滚、JSON 错误与 HTTP 状态码。测试结果写入 `artifacts/test-results/mvp1.trx`；HTTP 演示的 JSON 和日志写入独立的 `artifacts/smoke/{本次ID}` 文件夹。验收映射及尚未完成的条款见 [MVP1验收记录](docs/MVP1验收记录.md)。
+验证覆盖金额/利润率、CRUD、Reset、SQLite 持久化、五列/十列导入、单元格类型与异常归属。测试结果写入 `artifacts/test-results/mvp2.trx`；运行演示的 JSON 和日志分别保存在 `artifacts/smoke/{本次ID}`、`artifacts/import-smoke/{本次ID}`。验收映射见 [MVP1验收记录](docs/MVP1验收记录.md)和 [MVP2验收记录](docs/MVP2验收记录.md)。
+
+原始附件不在公开仓库。传入 `scripts/test.ps1 -OriginalImportFile 'C:\路径\导入其他费用清单.xlsx'` 才会运行该附件的自动化测试；未传入时只跳过这一项，生成的边界测试文件仍会执行。遇到正在运行的 API 锁住默认输出文件时，可用 `scripts/test.ps1 -OutputPath artifacts/mvp2-validation-build` 构建和测试；运行演示时加 `-ApiDirectory artifacts/mvp2-validation-build/Release/net48 -SkipBuild`。
 
 ## 后续 MVP
 
 | 阶段 | 完成条件 |
 | --- | --- |
-| MVP1，本次 | 本地能启动；Reset 后 CRUD 正常；边界错误清楚；持久化和计算验证通过 |
-| MVP2 | 已实现五列与十列导入、按表头/章节识别、同名覆盖和逐行报告；更多异常单元格与原题演示仍待完整验收 |
+| MVP1，已完成 | 本地启动、Reset、CRUD、持久化和计算验证通过 |
+| MVP2，已完成 | 五列与十列导入、表头/章节、同名覆盖和异常报告通过验收07至12；68项测试及8项导入HTTP检查通过 |
 | MVP3 | 从数据库生成完整清单；汇总/税金/利润率正确；样式与打印设置一致；导入→导出完整演示 |
 | MVP4 | 完整复验、实现思路文档、演示录屏与提交材料齐全，能够独立解释业务及代码 |
 

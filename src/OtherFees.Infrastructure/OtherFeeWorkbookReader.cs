@@ -6,17 +6,19 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using NPOI.SS.UserModel;
 using OtherFees.Application;
+using OtherFees.Domain;
 
 namespace OtherFees.Infrastructure
 {
     public sealed class OtherFeeWorkbookReader : IOtherFeeWorkbookReader
     {
-        private enum Format { FiveColumns, Summary }
+        private enum Scope { Unknown, Construction, Outside }
         private sealed class Header
         {
             public int Row;
-            public Format Format;
-            public int ProjectId = -1, Name = -1, Income = -1, Cost = -1, Remark = -1;
+            public bool FiveColumns;
+            public Dictionary<string, int> Columns;
+            public int this[string key] => Columns[key];
         }
 
         public IReadOnlyList<FeeImportRow> Read(Stream content)
@@ -27,228 +29,203 @@ namespace OtherFees.Infrastructure
             catch (Exception) { throw new ImportFormatException("文件无法作为有效的Excel工作簿读取。"); }
             using (workbook)
             {
-                if (workbook.NumberOfSheets == 0) throw new ImportFormatException("Excel文件没有工作表。");
-                ISheet sheet = FindSheet(workbook);
+                ISheet sheet = workbook.GetSheet("项目汇总清单");
+                if (sheet == null) throw new ImportFormatException("缺少工作表“项目汇总清单”。");
                 Header header = FindHeader(sheet);
-                return header.Format == Format.FiveColumns ? ReadFiveColumnRows(sheet, header) : ReadSummaryRows(sheet, header);
+                IFormulaEvaluator evaluator = workbook.GetCreationHelper().CreateFormulaEvaluator();
+                return ReadRows(sheet, header, evaluator);
             }
-        }
-
-        private static ISheet FindSheet(IWorkbook workbook)
-        {
-            for (int i = 0; i < workbook.NumberOfSheets; i++)
-                if (Normalize(workbook.GetSheetName(i)) == "项目汇总清单") return workbook.GetSheetAt(i);
-            return workbook.GetSheetAt(0);
         }
 
         private static Header FindHeader(ISheet sheet)
         {
-            int last = Math.Min(sheet.LastRowNum, 29);
-            for (int rowIndex = 0; rowIndex <= last; rowIndex++)
+            for (int index = sheet.FirstRowNum; index <= sheet.LastRowNum; index++)
             {
-                IRow row = sheet.GetRow(rowIndex);
+                IRow row = sheet.GetRow(index);
                 if (row == null) continue;
-                var fields = new Dictionary<string, int>(StringComparer.Ordinal);
-                var duplicateKeys = new HashSet<string>(StringComparer.Ordinal);
-                for (int column = 0; column < Math.Max(row.LastCellNum, (short)0); column++)
+                var columns = new Dictionary<string, int>();
+                var duplicates = new HashSet<string>();
+                for (int column = 0; column < row.LastCellNum; column++)
                 {
-                    string key = HeaderKey(CellText(row.GetCell(column)));
+                    ICell cell = row.GetCell(column);
+                    string key = cell?.CellType == CellType.String ? HeaderKey(cell.StringCellValue) : null;
                     if (key == null) continue;
-                    if (fields.ContainsKey(key)) duplicateKeys.Add(key);
-                    else fields.Add(key, column);
+                    if (columns.ContainsKey(key)) duplicates.Add(key); else columns.Add(key, column);
                 }
-                bool five = fields.ContainsKey("project") && fields.ContainsKey("name") && fields.ContainsKey("income") && fields.ContainsKey("cost");
-                bool summary = fields.ContainsKey("sequence") && fields.ContainsKey("name") && fields.ContainsKey("income")
-                    && fields.ContainsKey("cost") && fields.ContainsKey("remark") && fields.ContainsKey("profit") && fields.ContainsKey("rate");
-                if (!five && !summary) continue;
-                bool duplicateRequired = duplicateKeys.Any(key => key != "cost" || five);
-                if (duplicateRequired) throw new ImportFormatException("表头存在重复字段，请检查费用名称、收入价、成本价等关键列。");
-                return new Header
-                {
-                    Row = rowIndex,
-                    Format = five ? Format.FiveColumns : Format.Summary,
-                    ProjectId = Get(fields, "project"), Name = Get(fields, "name"),
-                    Income = Get(fields, "income"), Cost = Get(fields, "cost"), Remark = Get(fields, "remark")
-                };
+                bool five = columns.ContainsKey("project");
+                string[] required = five
+                    ? new[] { "project", "name", "income", "cost", "remark" }
+                    : new[] { "sequence", "name", "income", "cost", "profit", "area", "unitIncome", "unitCost", "rate", "remark" };
+                if (!required.All(columns.ContainsKey)) continue;
+                if (duplicates.Count > 0) throw new ImportFormatException("表头存在重复字段，无法确定列归属。");
+                return new Header { Row = index, FiveColumns = five, Columns = columns };
             }
-            throw new ImportFormatException("未找到可识别的五列表头或十列表头，文件结构未导入。");
+            throw new ImportFormatException("缺少完整的五列表头或十列表头，文件结构未导入。");
         }
-
-        private static int Get(IDictionary<string, int> fields, string key) => fields.TryGetValue(key, out int value) ? value : -1;
 
         private static string HeaderKey(string text)
         {
-            string value = Regex.Replace(Normalize(text).Replace("（", "(").Replace("）", ")"), @"\s+", string.Empty);
-            switch (value)
+            switch (Compact(text))
             {
                 case "项目Id": case "项目ID": return "project";
-                case "费用名称": case "项目名称": return "name";
+                case "费用名称": case "工项名称": case "项目名称": return "name";
                 case "收入价": case "收入价(元)": return "income";
                 case "成本价": case "成本价(元)": return "cost";
                 case "描述": case "备注": return "remark";
                 case "序号": return "sequence";
                 case "利润": case "利润(元)": return "profit";
+                case "建造面积": case "建筑面积": return "area";
+                case "单方收入": case "单方收入(元)": return "unitIncome";
+                case "单方成本": case "单方成本(元)": return "unitCost";
                 case "利润率": case "利润率(%)": return "rate";
                 default: return null;
             }
         }
 
-        private static IReadOnlyList<FeeImportRow> ReadFiveColumnRows(ISheet sheet, Header header)
+        private static IReadOnlyList<FeeImportRow> ReadRows(ISheet sheet, Header header, IFormulaEvaluator evaluator)
         {
-            var rows = new List<FeeImportRow>();
+            var result = new List<FeeImportRow>();
+            Scope scope = Scope.Unknown;
             for (int index = header.Row + 1; index <= sheet.LastRowNum; index++)
             {
                 IRow source = sheet.GetRow(index);
-                if (IsBlank(source)) continue;
+                if (IsBlank(source) || IsRepeatedHeader(source, header)) continue;
                 var row = new FeeImportRow { RowNumber = index + 1 };
-                row.ProjectId = CellText(source.GetCell(header.ProjectId)).Trim();
-                row.Name = CellText(source.GetCell(header.Name)).Trim();
-                row.Remark = EmptyToNull(CellText(source.GetCell(header.Remark)).Trim());
-                row.IncomePrice = ReadAmount(source.GetCell(header.Income), row, "IncomePrice", "收入价", true);
-                row.CostPrice = ReadAmount(source.GetCell(header.Cost), row, "CostPrice", "成本价", false);
-                if (string.IsNullOrWhiteSpace(row.ProjectId)) Add(row, "ProjectId", "PROJECT_REQUIRED", "项目Id不能为空。");
-                if (string.IsNullOrWhiteSpace(row.Name)) Add(row, "Name", "NAME_REQUIRED", "费用名称不能为空。");
-                rows.Add(row);
-            }
-            return rows;
-        }
-
-        private static IReadOnlyList<FeeImportRow> ReadSummaryRows(ISheet sheet, Header header)
-        {
-            var rows = new List<FeeImportRow>();
-            bool inOtherFeesSection = false;
-            for (int index = header.Row + 1; index <= sheet.LastRowNum; index++)
-            {
-                IRow source = sheet.GetRow(index);
-                if (IsBlank(source)) continue;
-                string name = CellText(source.GetCell(header.Name)).Trim();
-                bool hasAmounts = !IsBlank(source.GetCell(header.Income)) || !IsBlank(source.GetCell(header.Cost));
-                if (IsNumberedSectionLabel(name))
+                row.Name = ReadText(source.GetCell(header["name"]), evaluator, row, "Name");
+                if (header.FiveColumns)
                 {
-                    inOtherFeesSection = IsOtherFeesSection(name);
-                    if (hasAmounts)
+                    row.ProjectId = ReadText(source.GetCell(header["project"]), evaluator, row, "ProjectId");
+                    if (string.IsNullOrWhiteSpace(row.ProjectId)) Add(row, "ProjectId", "PROJECT_REQUIRED", "项目Id不能为空。");
+                }
+                else
+                {
+                    string sequence = ReadText(source.GetCell(header["sequence"]), evaluator, row, "Sequence");
+                    string chapter = GetChapter(sequence, row.Name);
+                    if (chapter != null)
                     {
-                        var suspicious = new FeeImportRow { RowNumber = index + 1, Name = name };
-                        Add(suspicious, "Name", "SECTION_ROW_HAS_DATA", "章节标题行包含金额，无法安全判断这些金额属于哪个费用，未导入。");
-                        rows.Add(suspicious);
+                        scope = chapter == "一建设安装工程费" ? Scope.Construction
+                            : IsKnownChapter(chapter) ? Scope.Outside : Scope.Unknown;
+                        if (scope == Scope.Unknown)
+                        {
+                            Add(row, "Name", "SECTION_INVALID", "章节标识或标题损坏，已暂停沿用上一章节归属。");
+                            result.Add(row);
+                        }
+                        continue;
                     }
-                    continue;
+                    if (IsFixedItem(row.Name) || IsTotal(row.Name)) continue;
+                    if (string.IsNullOrWhiteSpace(sequence) && IsExplanation(row.Name)
+                        && IsBlank(source.GetCell(header["income"])) && IsBlank(source.GetCell(header["cost"]))) continue;
+                    // 已确认的其他章节不包含建设安装工程费明细。
+                    if (scope == Scope.Outside) continue;
+                    if (!IsSequence(sequence))
+                    {
+                        Add(row, "Sequence", "SEQUENCE_INVALID", "其他费用明细序号须为正整数。");
+                        if (!string.IsNullOrWhiteSpace(sequence)) scope = Scope.Unknown;
+                    }
+                    if (scope != Scope.Construction)
+                        Add(row, "Name", "SECTION_UNCLEAR", "无法确认该行属于“一 建设安装工程费”，未导入。");
                 }
-                if (!hasAmounts && IsSectionLabel(name))
-                {
-                    inOtherFeesSection = IsOtherFeesSection(name);
-                    continue;
-                }
-                if (!hasAmounts && string.IsNullOrWhiteSpace(name)) continue;
-                if (IsNonBusinessLine(name)) continue;
-
-                var row = new FeeImportRow { RowNumber = index + 1, Name = name };
-                if (!inOtherFeesSection)
-                    Add(row, "Name", "SECTION_UNCLEAR", "该行不在可识别的“其他费用”章节内，未导入以避免错误归类。");
-                row.IncomePrice = ReadAmount(source.GetCell(header.Income), row, "IncomePrice", "收入价", true);
-                row.CostPrice = ReadAmount(source.GetCell(header.Cost), row, "CostPrice", "成本价", false);
-                row.Remark = EmptyToNull(CellText(source.GetCell(header.Remark)).Trim());
+                row.IncomePrice = ReadAmount(source.GetCell(header["income"]), evaluator, row, "IncomePrice");
+                row.CostPrice = ReadAmount(source.GetCell(header["cost"]), evaluator, row, "CostPrice");
+                row.Remark = ReadText(source.GetCell(header["remark"]), evaluator, row, "Remark");
                 if (string.IsNullOrWhiteSpace(row.Name)) Add(row, "Name", "NAME_REQUIRED", "费用名称不能为空。");
-                rows.Add(row);
+                result.Add(row);
             }
-            return rows;
+            return result;
         }
 
-        private static bool IsSectionLabel(string value)
+        private static string GetChapter(string sequence, string name)
         {
-            if (string.IsNullOrWhiteSpace(value)) return false;
-            return Regex.IsMatch(value, @"^(?:[一二三四五六七八九十]+[、.．]|[0-9]+[、.．]).+")
-                || value == "其他费用" || value == "设计费" || value == "建设安装工程费";
+            string first = Compact(sequence), second = Compact(name);
+            // 中文序号可在独立的序号列，或在合并后的章节标题中。
+            if (Regex.IsMatch(first, "^[一二三四五六七八九十]"))
+                return first.TrimEnd('、', '.', '．') + second;
+            if (Regex.IsMatch(second, "^[一二三四五六七八九十][、.．]"))
+                return Regex.Replace(second, "^([一二三四五六七八九十]+)[、.．]", "$1");
+            if (Regex.IsMatch(second, "^[一二三四五六七八九十]+建设安装工程费")) return second;
+            if (second == "建设安装工程费" || second == "设计费" || second == "其他费用" || second == "其它费用")
+                return "损坏章节" + second;
+            return null;
         }
 
-        private static bool IsNumberedSectionLabel(string value)
-            => !string.IsNullOrWhiteSpace(value) && Regex.IsMatch(value, @"^(?:[一二三四五六七八九十]+[、.．]|[0-9]+[、.．]).+");
-
-        private static bool IsOtherFeesSection(string value)
-            => Regex.IsMatch(value, @"^(?:[一二三四五六七八九十]+[、.．])?(?:其他|其它)费用(?:录入|明细|清单)?$");
-
-        private static bool IsNonBusinessLine(string name)
+        private static bool IsKnownChapter(string value) => value == "一建设安装工程费" || value == "二设计费"
+            || value == "三不含税合计" || value == "四税金(9%)" || value == "五含税合计";
+        private static bool IsSequence(string value) => decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal number)
+            && number > 0 && decimal.Truncate(number) == number;
+        private static bool IsTotal(string value) => Compact(value) == "不含税合计" || Compact(value) == "含税合计"
+            || Compact(value) == "税金(9%)" || Compact(value) == "小计" || Compact(value) == "合计";
+        private static bool IsFixedItem(string value)
         {
-            if (string.IsNullOrWhiteSpace(name)) return false;
-            string value = Normalize(name);
-            if (value.Contains("合计") || value.Contains("税金") || value == "设计费" || value == "建设安装工程费") return true;
-            for (int i = 1; i <= 6; i++) if (value == OtherFees.Domain.FixedWorkItem.NameForOrder(i)) return true;
+            for (int i = 1; i <= 6; i++) if (value == FixedWorkItem.NameForOrder(i)) return true;
             return false;
         }
+        private static bool IsExplanation(string value) => value.StartsWith("说明", StringComparison.Ordinal)
+            || value.StartsWith("备注", StringComparison.Ordinal) || value.StartsWith("注：", StringComparison.Ordinal)
+            || value.Contains("项目汇总清单");
+        private static bool IsRepeatedHeader(IRow row, Header header)
+            => header.Columns.All(column => row.GetCell(column.Value)?.CellType == CellType.String
+                && HeaderKey(row.GetCell(column.Value).StringCellValue) == column.Key);
 
-        private static decimal? ReadAmount(ICell cell, FeeImportRow row, string field, string display, bool nullable)
+        private static decimal? ReadAmount(ICell cell, IFormulaEvaluator evaluator, FeeImportRow row, string field)
         {
-            if (IsBlank(cell)) return nullable ? (decimal?)null : null;
+            if (IsBlank(cell)) return null;
             try
             {
-                if (cell.CellType == CellType.Formula)
+                CellValue value = Evaluate(cell, evaluator);
+                if (value.CellType == CellType.Numeric)
                 {
-                    IWorkbook workbook = cell.Sheet.Workbook;
-                    IFormulaEvaluator evaluator = workbook.GetCreationHelper().CreateFormulaEvaluator();
-                    CellValue evaluated = evaluator.Evaluate(cell);
-                    if (evaluated == null || evaluated.CellType == CellType.Error)
-                        throw new FormatException("公式结果无效。");
-                    if (evaluated.CellType == CellType.Numeric) return Convert.ToDecimal(evaluated.NumberValue, CultureInfo.InvariantCulture);
-                    if (evaluated.CellType == CellType.String)
-                        return string.IsNullOrWhiteSpace(evaluated.StringValue) ? (decimal?)null : ParseText(evaluated.StringValue);
-                    throw new FormatException("公式结果不是金额。");
+                    if (DateUtil.IsCellDateFormatted(cell)) throw new FormatException();
+                    return Convert.ToDecimal(value.NumberValue, CultureInfo.InvariantCulture);
                 }
-                if (cell.CellType == CellType.Numeric)
+                if (value.CellType == CellType.String)
                 {
-                    if (DateUtil.IsCellDateFormatted(cell)) throw new FormatException("日期单元格不能作为金额。");
-                    return Convert.ToDecimal(cell.NumericCellValue, CultureInfo.InvariantCulture);
+                    string text = value.StringValue.Trim();
+                    if (text.Length == 0) return null;
+                    text = text.TrimStart('￥', '¥').Replace('，', ',');
+                    if (!Regex.IsMatch(text, @"^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$")) throw new FormatException();
+                    return decimal.Parse(text, NumberStyles.Number, CultureInfo.InvariantCulture);
                 }
-                if (cell.CellType == CellType.String) return ParseText(cell.StringCellValue);
-                throw new FormatException("单元格类型不是数值或金额文本。");
+                if (value.CellType == CellType.Blank) return null;
+                throw new FormatException();
             }
-            catch (Exception error)
+            catch (Exception)
             {
-                Add(row, field, "AMOUNT_INVALID", display + "格式无效：" + error.Message);
+                Add(row, field, "AMOUNT_INVALID", "金额须为有效数值、金额文本或可计算的公式，日期、布尔值、错误或超范围结果均无效。");
                 return null;
             }
         }
 
-        private static decimal ParseText(string value)
+        private static string ReadText(ICell cell, IFormulaEvaluator evaluator, FeeImportRow row, string field)
         {
-            if (string.IsNullOrWhiteSpace(value)) return 0m;
-            string normalized = value.Trim().Replace("￥", "").Replace("¥", "").Replace(",", "").Replace("，", "");
-            if (decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal amount)) return amount;
-            if (decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.CurrentCulture, out amount)) return amount;
-            throw new FormatException("文本不能转换为金额。");
-        }
-
-        private static string CellText(ICell cell)
-        {
-            if (cell == null) return string.Empty;
-            if (cell.CellType == CellType.Formula)
+            if (IsBlank(cell)) return string.Empty;
+            try
             {
-                try
-                {
-                    IFormulaEvaluator evaluator = cell.Sheet.Workbook.GetCreationHelper().CreateFormulaEvaluator();
-                    CellValue value = evaluator.Evaluate(cell);
-                    if (value == null || value.CellType == CellType.Error) return string.Empty;
-                    if (value.CellType == CellType.String) return value.StringValue ?? string.Empty;
-                    if (value.CellType == CellType.Numeric) return value.NumberValue.ToString(CultureInfo.InvariantCulture);
-                    return string.Empty;
-                }
-                catch { return string.Empty; }
+                CellValue value = Evaluate(cell, evaluator);
+                if (value.CellType == CellType.String) return value.StringValue.Trim();
+                if (value.CellType == CellType.Numeric) return value.NumberValue.ToString(CultureInfo.InvariantCulture);
+                if (value.CellType == CellType.Blank) return string.Empty;
+                throw new FormatException();
             }
-            if (cell.CellType == CellType.String) return cell.StringCellValue ?? string.Empty;
-            if (cell.CellType == CellType.Numeric) return cell.NumericCellValue.ToString(CultureInfo.InvariantCulture);
-            return string.Empty;
+            catch (Exception)
+            {
+                Add(row, field, "CELL_INVALID", "单元格包含错误、布尔值或无法计算的公式。");
+                return string.Empty;
+            }
         }
 
-        private static bool IsBlank(IRow row)
+        private static CellValue Evaluate(ICell cell, IFormulaEvaluator evaluator)
         {
-            if (row == null) return true;
-            for (int i = row.FirstCellNum; i >= 0 && i < row.LastCellNum; i++) if (!IsBlank(row.GetCell(i))) return false;
-            return true;
+            if (cell.CellType == CellType.Formula) return evaluator.Evaluate(cell);
+            if (cell.CellType == CellType.String) return new CellValue(cell.StringCellValue);
+            if (cell.CellType == CellType.Numeric) return new CellValue(cell.NumericCellValue);
+            if (cell.CellType == CellType.Boolean) return CellValue.ValueOf(cell.BooleanCellValue);
+            if (cell.CellType == CellType.Error) return CellValue.GetError(cell.ErrorCellValue);
+            return new CellValue(string.Empty);
         }
-
+        private static bool IsBlank(IRow row) => row == null || row.Cells.All(IsBlank);
         private static bool IsBlank(ICell cell) => cell == null || cell.CellType == CellType.Blank
             || (cell.CellType == CellType.String && string.IsNullOrWhiteSpace(cell.StringCellValue));
-        private static string Normalize(string value) => (value ?? string.Empty).Trim().Normalize(System.Text.NormalizationForm.FormC);
-        private static string EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+        private static string Compact(string value) => Regex.Replace((value ?? string.Empty).Trim().Replace("（", "(").Replace("）", ")"), @"\s+", string.Empty);
         private static void Add(FeeImportRow row, string field, string code, string reason)
             => row.Issues.Add(new FeeImportIssue { RowNumber = row.RowNumber, Field = field, Code = code, Reason = reason });
     }

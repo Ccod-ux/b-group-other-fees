@@ -46,17 +46,22 @@ namespace OtherFees.Api
         [HttpPost, Route("api/projects/{projectId}/other-fees/import")]
         public async Task<IHttpActionResult> Import(string projectId)
         {
-            if (!Request.Content.IsMimeMultipartContent())
+            if (Request.Content == null || !Request.Content.IsMimeMultipartContent())
                 return Content(HttpStatusCode.BadRequest, new ApiError("MULTIPART_REQUIRED", "请使用multipart/form-data上传Excel文件。", "File"));
             var provider = new MultipartMemoryStreamProvider();
-            await Request.Content.ReadAsMultipartAsync(provider);
-            if (provider.Contents.Count != 1 || provider.Contents[0].Headers.ContentDisposition.FileName == null)
-                return Content(HttpStatusCode.BadRequest, new ApiError("FILE_REQUIRED", "请只上传一个Excel文件。", "File"));
-            HttpContent part = provider.Contents[0];
-            if (part.Headers.ContentLength == 0)
-                return Content(HttpStatusCode.BadRequest, new ApiError("FILE_REQUIRED", "上传的Excel文件不能为空。", "File"));
             try
             {
+                try { await Request.Content.ReadAsMultipartAsync(provider); }
+                catch (IOException) { return Content(HttpStatusCode.BadRequest, new ApiError("MULTIPART_INVALID", "上传内容不完整或multipart格式损坏。", "File")); }
+                catch (HttpRequestException) { return Content(HttpStatusCode.BadRequest, new ApiError("MULTIPART_INVALID", "上传内容不完整或multipart格式损坏。", "File")); }
+                if (provider.Contents.Count != 1)
+                    return Content(HttpStatusCode.BadRequest, new ApiError("FILE_REQUIRED", "请只上传一个Excel文件。", "File"));
+                HttpContent part = provider.Contents[0];
+                var disposition = part.Headers.ContentDisposition;
+                if (disposition == null || (disposition.FileName == null && disposition.FileNameStar == null))
+                    return Content(HttpStatusCode.BadRequest, new ApiError("FILE_REQUIRED", "请只上传一个Excel文件。", "File"));
+                if (part.Headers.ContentLength == 0)
+                    return Content(HttpStatusCode.BadRequest, new ApiError("FILE_REQUIRED", "上传的Excel文件不能为空。", "File"));
                 using (Stream stream = await part.ReadAsStreamAsync())
                     return Ok(importer.Import(projectId, stream));
             }
@@ -64,6 +69,7 @@ namespace OtherFees.Api
             {
                 return Content(HttpStatusCode.BadRequest, new ApiError("IMPORT_FILE_INVALID", error.Message, "File"));
             }
+            finally { foreach (HttpContent part in provider.Contents) part.Dispose(); }
         }
 
         // PUT替换可编辑字段：收入/备注省略时变为null，成本/名称仍然必填。
