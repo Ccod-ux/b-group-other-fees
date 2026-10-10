@@ -1,6 +1,6 @@
 # MVP3验收记录
 
-2026年10月10日，标准Excel导出阶段验收13至17通过。目标仍为.NET Framework 4.8、Windows x64、WebAPI2、SQLite、NPOI 2.7.6。最终交付复验、实现思路文档及录屏留到MVP4。
+2026年10月10日，标准Excel导出阶段验收13至17通过。目标仍为.NET Framework 4.8、Windows x64、WebAPI2、SQLite、NPOI 2.7.6。最终交付状态后续更新于MVP4交付记录，运行演示采用截图和Excel对照。
 
 ## 实现
 
@@ -53,4 +53,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\smoke-export.ps1 -SkipBuild -
 
 ## 后续工作
 
-MVP4执行从干净状态的完整复验，整理实现思路Word、提交材料、接口集合及运行录屏。当前未把这一最终交付阶段标记完成。导入遇到未预期系统数据库故障的边界仍见MVP2验收记录。
+MVP4已整理干净源码验证记录、实现思路Word、提交包、接口示例及运行截图；详情见[MVP4交付记录](MVP4交付记录.md)。原题没有规定视频录制。导入遇到未预期系统数据库故障的边界仍见MVP2验收记录。
