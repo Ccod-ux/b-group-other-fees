@@ -19,19 +19,20 @@ namespace OtherFees.Domain
         public decimal ProfitRatePercent => Income == null || Income.Amount == 0m
             ? 0m : decimal.Round(Profit / Income.Amount * 100m, 2, MidpointRounding.AwayFromZero);
 
-        private OtherFee(string id, string projectId, long sortOrder, string name, decimal? income, decimal? cost, string remark)
+        private OtherFee(string id, string projectId, long sortOrder, string name, decimal? income, decimal? cost, string remark, bool checkReservedName = true)
         {
             if (string.IsNullOrWhiteSpace(projectId))
                 throw new BusinessException(BusinessErrorKind.Validation, "PROJECT_REQUIRED", "ProjectId不能为空。", "ProjectId");
             Id = id; ProjectId = projectId.Trim(); SortOrder = sortOrder;
-            ChangeDetails(name, income, cost, remark);
+            ChangeDetails(name, income, cost, remark, checkReservedName);
         }
 
         public static OtherFee Create(string projectId, string name, decimal? income, decimal? cost, string remark)
             => new OtherFee(Guid.NewGuid().ToString("N"), projectId, 0, name, income, cost, remark);
 
         public static OtherFee Restore(string id, string projectId, long sortOrder, string name, decimal? income, decimal cost, string remark)
-            => new OtherFee(id, projectId, sortOrder, name, income, cost, remark);
+            // 旧版已保存的保留名称仍可读取，后续修改必须改成合法费用名称。
+            => new OtherFee(id, projectId, sortOrder, name, income, cost, remark, false);
 
         // 是否已有同名记录由仓储查询；业务上如何处理重复由领域决定。
         public void EnsureNameAvailable(bool nameExists)
@@ -41,14 +42,14 @@ namespace OtherFees.Domain
             => new BusinessException(BusinessErrorKind.Conflict, "NAME_DUPLICATE", "同一项目内费用名称不能重复。", "Name");
 
         public void ChangeDetails(string name, decimal? income, decimal? cost, string remark)
+            => ChangeDetails(name, income, cost, remark, true);
+
+        private void ChangeDetails(string name, decimal? income, decimal? cost, string remark, bool checkReservedName)
         {
             if (string.IsNullOrWhiteSpace(name))
                 throw new BusinessException(BusinessErrorKind.Validation, "NAME_REQUIRED", "费用名称不能为空。", "Name");
             string normalized = name.Trim().Normalize(NormalizationForm.FormC);
-            for (int order = 1; order <= 6; order++)
-                if (normalized == FixedWorkItem.NameForOrder(order)) ReservedName();
-            if (normalized == "建设安装工程费" || normalized == "设计费" || normalized == "不含税合计"
-                || normalized == "税金（9%）" || normalized == "含税合计") ReservedName();
+            if (checkReservedName && SummaryNames.IsReserved(normalized)) ReservedName();
             if (!cost.HasValue)
                 throw new BusinessException(BusinessErrorKind.Validation, "COST_REQUIRED", "成本价必填。", "CostPrice");
             if (cost.Value < 0m)

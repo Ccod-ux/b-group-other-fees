@@ -104,7 +104,7 @@ namespace OtherFees.Infrastructure
                     if (chapter != null)
                     {
                         scope = chapter == "一建设安装工程费" ? Scope.Construction
-                            : IsKnownChapter(chapter) ? Scope.Outside : Scope.Unknown;
+                            : SummaryNames.IsKnownChapter(chapter) ? Scope.Outside : Scope.Unknown;
                         if (scope == Scope.Unknown)
                         {
                             Add(row, "Name", "SECTION_INVALID", "章节标识或标题损坏，已暂停沿用上一章节归属。");
@@ -112,11 +112,20 @@ namespace OtherFees.Infrastructure
                         }
                         continue;
                     }
-                    if (IsFixedItem(row.Name) || IsTotal(row.Name)) continue;
-                    if (string.IsNullOrWhiteSpace(sequence) && IsExplanation(row.Name)
-                        && IsBlank(source.GetCell(header["income"])) && IsBlank(source.GetCell(header["cost"]))) continue;
                     // 已确认的其他章节不包含建设安装工程费明细。
                     if (scope == Scope.Outside) continue;
+                    // 数字序号的保留名称属于可疑明细，不能静默当作小计或章节丢弃。
+                    // 六个固定工项仍是标准清单的正常非导入行。
+                    if (SummaryNames.IsFixedItem(row.Name) && (!IsSequence(sequence) || IsFixedItemSequence(sequence, row.Name))) continue;
+                    if (IsSequence(sequence) && SummaryNames.IsReserved(row.Name))
+                    {
+                        Add(row, "Name", "NAME_RESERVED", "明细使用了固定工项或章节/合计名称，请改名后导入。");
+                        result.Add(row);
+                        continue;
+                    }
+                    if (SummaryNames.IsTotal(row.Name)) continue;
+                    if (string.IsNullOrWhiteSpace(sequence) && IsExplanation(row.Name)
+                        && IsBlank(source.GetCell(header["income"])) && IsBlank(source.GetCell(header["cost"]))) continue;
                     if (!IsSequence(sequence))
                     {
                         Add(row, "Sequence", "SEQUENCE_INVALID", "其他费用明细序号须为正整数。");
@@ -136,6 +145,7 @@ namespace OtherFees.Infrastructure
 
         private static string GetChapter(string sequence, string name)
         {
+            if (IsSequence(sequence)) return null;
             string first = Compact(sequence), second = Compact(name);
             // 中文序号可在独立的序号列，或在合并后的章节标题中。
             if (Regex.IsMatch(first, "^[一二三四五六七八九十]"))
@@ -143,22 +153,17 @@ namespace OtherFees.Infrastructure
             if (Regex.IsMatch(second, "^[一二三四五六七八九十][、.．]"))
                 return Regex.Replace(second, "^([一二三四五六七八九十]+)[、.．]", "$1");
             if (Regex.IsMatch(second, "^[一二三四五六七八九十]+建设安装工程费")) return second;
-            if (second == "建设安装工程费" || second == "设计费" || second == "其他费用" || second == "其它费用")
+            if (SummaryNames.IsSectionTitle(second))
                 return "损坏章节" + second;
             return null;
         }
 
-        private static bool IsKnownChapter(string value) => value == "一建设安装工程费" || value == "二设计费"
-            || value == "三不含税合计" || value == "四税金(9%)" || value == "五含税合计";
         private static bool IsSequence(string value) => decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal number)
             && number > 0 && decimal.Truncate(number) == number;
-        private static bool IsTotal(string value) => Compact(value) == "不含税合计" || Compact(value) == "含税合计"
-            || Compact(value) == "税金(9%)" || Compact(value) == "小计" || Compact(value) == "合计";
-        private static bool IsFixedItem(string value)
-        {
-            for (int i = 1; i <= 6; i++) if (value == FixedWorkItem.NameForOrder(i)) return true;
-            return false;
-        }
+        private static bool IsFixedItemSequence(string sequence, string name)
+            => decimal.TryParse(sequence, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal number)
+                && number >= 1 && number <= 6 && decimal.Truncate(number) == number
+                && Compact(name) == Compact(FixedWorkItem.NameForOrder((int)number));
         private static bool IsExplanation(string value) => value.StartsWith("说明", StringComparison.Ordinal)
             || value.StartsWith("备注", StringComparison.Ordinal) || value.StartsWith("注：", StringComparison.Ordinal)
             || value.Contains("项目汇总清单");
@@ -225,7 +230,7 @@ namespace OtherFees.Infrastructure
         private static bool IsBlank(IRow row) => row == null || row.Cells.All(IsBlank);
         private static bool IsBlank(ICell cell) => cell == null || cell.CellType == CellType.Blank
             || (cell.CellType == CellType.String && string.IsNullOrWhiteSpace(cell.StringCellValue));
-        private static string Compact(string value) => Regex.Replace((value ?? string.Empty).Trim().Replace("（", "(").Replace("）", ")"), @"\s+", string.Empty);
+        private static string Compact(string value) => SummaryNames.Compact(value);
         private static void Add(FeeImportRow row, string field, string code, string reason)
             => row.Issues.Add(new FeeImportIssue { RowNumber = row.RowNumber, Field = field, Code = code, Reason = reason });
     }

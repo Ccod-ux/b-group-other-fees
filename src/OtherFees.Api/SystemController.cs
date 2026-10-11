@@ -12,7 +12,11 @@ namespace OtherFees.Api
         { this.maintenance = maintenance; this.enableReset = enableReset; }
 
         [HttpGet, Route("api/health")]
-        public IHttpActionResult Health() => Ok(new { Status = "ok", Stage = "MVP1" });
+        public IHttpActionResult Health() => Ok(new
+        {
+            Status = "ok",
+            Version = typeof(SystemController).Assembly.GetName().Version.ToString(3)
+        });
 
         [HttpPost, Route("api/reset")]
         public IHttpActionResult Reset()
